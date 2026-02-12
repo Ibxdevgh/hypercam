@@ -1,0 +1,135 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HYPERCAM</title>
+    <script src="3.4.17"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="css2" rel="stylesheet">
+    <style>
+        /* Defense Industrial: Zero curvature globally */
+        *, *::before, *::after {
+            border-radius: 0 !important;
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #000000;
+            color: #ffffff;
+            overflow-x: hidden;
+        }
+        /* Grid-lines only. No gradients. */
+        .grid-bg {
+            background-image: linear-gradient(rgba(255,255,255,0.06) 1px, transparent 1px),
+                              linear-gradient(90deg, rgba(255,255,255,0.06) 1px, transparent 1px);
+            background-size: 50px 50px;
+        }
+        /* Crosshair corner motif for panels */
+        .crosshair-corners::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 12px;
+            height: 12px;
+            border-top: 1px solid rgba(255,255,255,0.2);
+            border-left: 1px solid rgba(255,255,255,0.2);
+            pointer-events: none;
+        }
+        .crosshair-corners::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            right: 0;
+            width: 12px;
+            height: 12px;
+            border-bottom: 1px solid rgba(255,255,255,0.2);
+            border-right: 1px solid rgba(255,255,255,0.2);
+            pointer-events: none;
+        }
+        ::selection {
+            background: rgba(255,255,255,0.15);
+            color: #ffffff;
+        }
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #000000;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255,255,255,0.15);
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255,255,255,0.25);
+        }
+        @supports (-webkit-appearance: none) {
+            * {
+                -webkit-transform: translateZ(0);
+                transform: translateZ(0);
+            }
+            [data-framer-motion] {
+                will-change: transform;
+                -webkit-backface-visibility: hidden;
+                backface-visibility: hidden;
+            }
+        }
+        .motion-safe\:transform {
+            -webkit-transform: translateZ(0);
+            transform: translateZ(0);
+            will-change: transform;
+        }
+    </style>
+
+<script type="importmap">
+{
+  "imports": {
+    "lucide-react": "https://esm.sh/lucide-react@^0.475.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.0.0/",
+    "framer-motion": "https://esm.sh/framer-motion@^12.0.0",
+    "react/": "https://esm.sh/react@^19.0.0/",
+    "react": "https://esm.sh/react@^19.0.0"
+  }
+}
+</script>
+  <script type="module" crossorigin src="assets/index-DhV4stTm.js"></script>
+</head>
+<body>
+    <div id="root"></div>
+    <script>
+    (function(){
+        if (!document.getElementById('live-dot-style')) {
+            var s = document.createElement('style');
+            s.id = 'live-dot-style';
+            s.textContent = '@keyframes livePulse{0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(220,38,38,.7)}50%{opacity:.6;box-shadow:0 0 6px 3px rgba(220,38,38,.3)}}' +
+                '.live-dot{display:inline-block;width:6px;height:6px;background:#dc2626;margin-right:6px;vertical-align:middle;animation:livePulse 1.2s ease-in-out infinite}';
+            document.head.appendChild(s);
+        }
+        var btnTargets = {'Get Started':1,'Initialize Deployment':1,'Live Detection':1};
+        function hijack() {
+            // Replace CTA buttons
+            document.querySelectorAll('a').forEach(function(el){
+                var t = el.textContent.trim();
+                if (btnTargets[t]) {
+                    el.href = 'live.html';
+                    el.innerHTML = '<span class="live-dot"></span>LIVE DETECTION';
+                    delete btnTargets[t];
+                }
+            });
+            // Replace all Protent text with HYPERCAM
+            var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+            var node;
+            while (node = walker.nextNode()) {
+                if (/protent/i.test(node.nodeValue)) {
+                    node.nodeValue = node.nodeValue.replace(/PROTENT/g, 'HYPERCAM').replace(/Protent/g, 'HYPERCAM').replace(/protent/g, 'HYPERCAM');
+                }
+            }
+            return Object.keys(btnTargets).length === 0;
+        }
+        var n = 0;
+        var iv = setInterval(function(){ if (hijack() || ++n > 50) clearInterval(iv); }, 100);
+    })();
+    </script>
+</body>
+</html>

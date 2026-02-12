@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Protent — HYPERCAM</title>
+    <script src="3.4.17"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="css2" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+    <style>
+        *, *::before, *::after {
+            border-radius: 0 !important;
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #000000;
+            color: #ffffff;
+            overflow: hidden;
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+        }
+        .grid-bg {
+            background-image: linear-gradient(rgba(255,255,255,0.06) 1px, transparent 1px),
+                              linear-gradient(90deg, rgba(255,255,255,0.06) 1px, transparent 1px);
+            background-size: 50px 50px;
+        }
+        .crosshair-corners { position: relative; }
+        .crosshair-corners::before {
+            content: '';position: absolute;top: 0;left: 0;width: 12px;height: 12px;
+            border-top: 1px solid rgba(255,255,255,0.2);border-left: 1px solid rgba(255,255,255,0.2);
+            pointer-events: none;z-index: 10;
+        }
+        .crosshair-corners::after {
+            content: '';position: absolute;bottom: 0;right: 0;width: 12px;height: 12px;
+            border-bottom: 1px solid rgba(255,255,255,0.2);border-right: 1px solid rgba(255,255,255,0.2);
+            pointer-events: none;z-index: 10;
+        }
+        ::selection { background: rgba(255,255,255,0.15); color: #ffffff; }
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: #000000; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.25); }
+
+        #videoContainer { position: relative; }
+        #webcam { display: block; width: 100%; height: 100%; object-fit: contain; background: #000; }
+        #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+
+        .detection-entry { animation: fadeSlideIn 0.2s ease-out; }
+        @keyframes fadeSlideIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes scanline { 0% { transform: translateY(-100%); } 100% { transform: translateY(100vh); } }
+        .scanline {
+            position: absolute; top: 0; left: 0; right: 0; height: 2px;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.06), transparent);
+            animation: scanline 4s linear infinite; pointer-events: none; z-index: 5;
+        }
+        .threat-bar-fill { transition: width 0.5s ease-out; }
+        .src-btn.src-active { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2); color: rgba(255,255,255,0.8); }
+
+        /* Threat alert flash */
+        @keyframes threatPulse {
+            0%, 100% { border-color: rgba(239,68,68,0.8); box-shadow: inset 0 0 30px rgba(239,68,68,0.05); }
+            50% { border-color: rgba(239,68,68,0.2); box-shadow: inset 0 0 30px rgba(239,68,68,0); }
+        }
+        @keyframes threatBannerPulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+        .threat-active {
+            border: 2px solid rgba(239,68,68,0.8) !important;
+            animation: threatPulse 1s ease-in-out infinite;
+        }
+        #threatBanner {
+            transition: transform 0.3s ease-out, opacity 0.3s ease-out;
+            transform: translateY(-100%);
+            opacity: 0;
+        }
+        #threatBanner.visible {
+            transform: translateY(0);
+            opacity: 1;
+        }
+        #threatBanner.visible .banner-text {
+            animation: threatBannerPulse 1s ease-in-out infinite;
+        }
+    </style>
+</head>
+<body class="grid-bg">
+
+    <!-- THREAT ALERT BANNER -->
+    <div id="threatBanner" class="absolute top-10 left-0 right-0 z-40 bg-red-950/90 border-b border-red-500/50 px-4 py-1.5 flex items-center justify-center gap-3">
+        <div class="w-2 h-2 bg-red-500 animate-pulse"></div>
+        <span class="banner-text font-mono text-[9px] tracking-widest uppercase text-red-400 font-bold" id="threatBannerText">THREAT DETECTED</span>
+        <div class="w-2 h-2 bg-red-500 animate-pulse"></div>
+    </div>
+
+    <!-- NAV BAR -->
+    <div class="h-10 border-b border-white/10 flex items-center justify-between px-4 bg-black/80 backdrop-blur-sm" style="z-index:50; position:relative;">
+        <div class="flex items-center gap-3">
+            <span class="font-mono text-[10px] tracking-widest uppercase font-bold text-white">P</span>
+            <span class="font-mono text-[10px] tracking-widest uppercase text-white/60">HYPERCAM</span>
+            <div class="h-3 w-px bg-white/10 mx-2"></div>
+            <div class="bg-white/5 border border-white/10 px-2 py-0.5 flex items-center gap-1.5">
+                <div class="w-1.5 h-1.5 bg-red-600 animate-pulse"></div>
+                <span class="font-mono text-[8px] tracking-widest uppercase text-red-400">HYPERCAM</span>
+            </div>
+            <div class="h-3 w-px bg-white/10 mx-1"></div>
+            <div class="flex items-center gap-1">
+                <button id="srcWebcam" class="src-btn src-active font-mono text-[7px] tracking-widest uppercase px-2 py-0.5 border border-white/20 bg-white/10 text-white/80 hover:bg-white/10 transition-colors cursor-pointer">WEBCAM</button>
+                <button id="srcScreen" class="src-btn font-mono text-[7px] tracking-widest uppercase px-2 py-0.5 border border-white/10 bg-transparent text-white/40 hover:bg-white/5 transition-colors cursor-pointer">SCREEN CAPTURE</button>
+            </div>
+        </div>
+        <a href="index.html" class="font-mono text-[8px] tracking-widest uppercase text-white/40 hover:text-white/80 transition-colors flex items-center gap-1">
+            <span>&larr;</span> BACK HOME
+        </a>
+    </div>
+
+    <!-- MAIN CONTENT -->
+    <div class="flex" style="height: calc(100vh - 40px - 28px);">
+
+        <!-- LEFT SIDEBAR: DETECTION LOG -->
+        <div class="w-56 border-r border-white/10 flex flex-col bg-black/60 flex-shrink-0">
+            <div class="h-7 border-b border-white/10 flex items-center px-3 bg-black/40">
+                <span class="font-mono text-[8px] tracking-widest uppercase text-white/50">DETECTIONS_LOG</span>
+                <span id="detectionCount" class="font-mono text-[8px] tracking-widest text-white/30 ml-auto">0</span>
+            </div>
+            <div id="detectionLog" class="flex-1 overflow-y-auto p-2 space-y-1">
+                <div class="font-mono text-[7px] text-white/20 tracking-widest uppercase text-center py-8">AWAITING_STREAM</div>
+            </div>
+            <div class="h-6 border-t border-white/10 flex items-center px-3">
+                <button id="clearLog" class="font-mono text-[7px] tracking-widest uppercase text-white/30 hover:text-white/60 transition-colors">CLEAR</button>
+            </div>
+        </div>
+
+        <!-- CENTER: VIDEO FEED -->
+        <div class="flex-1 flex flex-col min-w-0">
+            <div id="videoContainer" class="flex-1 bg-black relative crosshair-corners overflow-hidden border-2 border-transparent transition-all duration-300">
+                <video id="webcam" autoplay playsinline muted></video>
+                <canvas id="overlay"></canvas>
+                <div class="scanline"></div>
+                <!-- Stream label -->
+                <div class="absolute top-2 left-2 bg-black/80 px-2 py-1 border border-white/10 flex items-center gap-1.5" style="z-index:20;">
+                    <div class="w-1.5 h-1.5 bg-red-600 animate-pulse"></div>
+                    <span id="streamLabel" class="font-mono text-[6px] tracking-widest uppercase text-white/60">STREAM_0</span>
+                </div>
+                <!-- Threat level badge (top-right of video) -->
+                <div id="threatBadge" class="absolute top-2 right-2 bg-black/80 px-2 py-1 border border-white/10 hidden" style="z-index:20;">
+                    <span id="threatBadgeText" class="font-mono text-[7px] tracking-widest uppercase font-bold text-emerald-400">CLEAR</span>
+                </div>
+                <!-- Loading overlay -->
+                <div id="loadingOverlay" class="absolute inset-0 bg-black/90 flex flex-col items-center justify-center" style="z-index:30;">
+                    <div class="font-mono text-[10px] tracking-widest uppercase text-white/60 mb-3">INITIALIZING_MODEL</div>
+                    <div class="w-32 h-px bg-white/10 relative overflow-hidden">
+                        <div class="absolute inset-y-0 left-0 bg-white/40 animate-pulse" style="width:60%"></div>
+                    </div>
+                    <div id="loadingStatus" class="font-mono text-[8px] tracking-widest uppercase text-white/30 mt-2">LOADING TENSORFLOW.JS...</div>
+                </div>
+                <!-- Error overlay -->
+                <div id="cameraError" class="absolute inset-0 bg-black/90 flex flex-col items-center justify-center hidden" style="z-index:30;">
+                    <div id="errorTitle" class="font-mono text-[10px] tracking-widest uppercase text-red-400 mb-2">CAMERA_ACCESS_DENIED</div>
+                    <div id="errorMsg" class="font-mono text-[8px] tracking-widest uppercase text-white/30">ENABLE CAMERA PERMISSIONS TO CONTINUE</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- RIGHT SIDEBAR: THREAT ANALYSIS -->
+        <div class="w-56 border-l border-white/10 flex flex-col bg-black/60 flex-shrink-0">
+            <div class="h-7 border-b border-white/10 flex items-center px-3 bg-black/40">
+                <span class="font-mono text-[8px] tracking-widest uppercase text-white/50">THREAT_ANALYSIS</span>
+            </div>
+            <div class="flex-1 overflow-y-auto p-3 space-y-3">
+
+                <!-- Threat Level -->
+                <div id="threatLevelPanel" class="crosshair-corners border border-white/10 p-2 transition-colors duration-300">
+                    <div class="font-mono text-[7px] tracking-widest uppercase text-white/40 mb-2">THREAT_LEVEL</div>
+                    <div class="space-y-1.5">
+                        <div class="flex items-center justify-between">
+                            <span id="escalationLabel" class="font-mono text-[10px] tracking-widest uppercase font-bold text-emerald-400">CLEAR</span>
+                            <span id="escalationValue" class="font-mono text-[8px] tracking-widest text-white/40">0</span>
+                        </div>
+                        <div class="h-1.5 bg-white/5 w-full">
+                            <div id="escalationBar" class="h-full bg-emerald-500 threat-bar-fill" style="width:0%"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Active Threats -->
+                <div id="activeThreatsPanel" class="crosshair-corners border border-white/10 p-2">
+                    <div class="font-mono text-[7px] tracking-widest uppercase text-white/40 mb-2">ACTIVE_THREATS</div>
+                    <div id="activeThreats" class="space-y-1">
+                        <div class="font-mono text-[8px] text-white/20 tracking-widest uppercase">NONE</div>
+                    </div>
+                </div>
+
+                <!-- Object Counts -->
+                <div class="crosshair-corners border border-white/10 p-2">
+                    <div class="font-mono text-[7px] tracking-widest uppercase text-white/40 mb-2">OBJECT_COUNT</div>
+                    <div id="objectCounts" class="space-y-1">
+                        <div class="font-mono text-[8px] text-white/20 tracking-widest uppercase">NO_DETECTIONS</div>
+                    </div>
+                </div>
+
+                <!-- Confidence -->
+                <div class="crosshair-corners border border-white/10 p-2">
+                    <div class="font-mono text-[7px] tracking-widest uppercase text-white/40 mb-2">CONFIDENCE_AVG</div>
+                    <div id="confidenceDisplay" class="flex items-baseline gap-1">
+                        <span class="font-mono text-[18px] font-bold text-emerald-400">--</span>
+                        <span class="font-mono text-[8px] text-white/30">%</span>
+                    </div>
+                </div>
+
+                <!-- Person Tracking -->
+                <div class="crosshair-corners border border-white/10 p-2">
+                    <div class="font-mono text-[7px] tracking-widest uppercase text-white/40 mb-2">PERSON_TRACKING</div>
+                    <div class="space-y-1">
+                        <div class="flex items-center justify-between">
+                            <span class="font-mono text-[8px] tracking-widest uppercase text-white/30">SUBJECTS</span>
+                            <span id="personCount" class="font-mono text-[10px] font-bold text-white/60">0</span>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <span class="font-mono text-[8px] tracking-widest uppercase text-white/30">MAX_CONF</span>
+                            <span id="personConfidence" class="font-mono text-[10px] font-bold text-white/60">--</span>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+    </div>
+
+    <!-- STATUS BAR -->
+    <div id="statusBar" class="h-7 border-t border-white/10 flex items-center px-4 bg-black/80 justify-between transition-colors duration-300" style="z-index:50; position:relative;">
+        <div class="flex items-center gap-4">
+            <div class="flex items-center gap-1.5">
+                <div id="statusDot" class="w-1.5 h-1.5 bg-emerald-500 animate-pulse"></div>
+                <span class="font-mono text-[7px] tracking-widest uppercase text-white/40">SOP_GUARD: <span id="statusLabel" class="text-emerald-400">ACTIVE</span></span>
+            </div>
+            <div class="h-3 w-px bg-white/10"></div>
+            <span class="font-mono text-[7px] tracking-widest uppercase text-white/40">MODEL: <span class="text-white/60">COCO-SSD</span></span>
+            <div class="h-3 w-px bg-white/10"></div>
+            <span class="font-mono text-[7px] tracking-widest uppercase text-white/40">BACKEND: <span id="backendLabel" class="text-white/60">--</span></span>
+        </div>
+        <div class="flex items-center gap-4">
+            <span id="statusThreat" class="font-mono text-[7px] tracking-widest uppercase text-white/40 hidden">THREAT: <span id="statusThreatLabel" class="text-red-400 font-bold">--</span></span>
+            <div id="statusThreatDiv" class="h-3 w-px bg-white/10 hidden"></div>
+            <span class="font-mono text-[7px] tracking-widest uppercase text-white/40">OBJECTS: <span id="statusObjectCount" class="text-white/60">0</span></span>
+            <div class="h-3 w-px bg-white/10"></div>
+            <span class="font-mono text-[7px] tracking-widest uppercase text-white/40">FPS: <span id="fpsDisplay" class="text-white/60">--</span></span>
+            <div class="h-3 w-px bg-white/10"></div>
+            <span class="font-mono text-[7px] tracking-widest uppercase text-white/40">RES: <span id="resDisplay" class="text-white/60">--</span></span>
+        </div>
+    </div>
+
+<script>
+(function() {
+    // DOM refs
+    const video = document.getElementById('webcam');
+    const canvas = document.getElementById('overlay');
+    const ctx = canvas.getContext('2d');
+    const detectionLog = document.getElementById('detectionLog');
+    const detectionCount = document.getElementById('detectionCount');
+    const objectCounts = document.getElementById('objectCounts');
+    const confidenceDisplay = document.getElementById('confidenceDisplay');
+    const escalationLabel = document.getElementById('escalationLabel');
+    const escalationValue = document.getElementById('escalationValue');
+    const escalationBar = document.getElementById('escalationBar');
+    const personCount = document.getElementById('personCount');
+    const personConfidence = document.getElementById('personConfidence');
+    const fpsDisplay = document.getElementById('fpsDisplay');
+    const resDisplay = document.getElementById('resDisplay');
+    const statusObjectCount = document.getElementById('statusObjectCount');
+    const backendLabel = document.getElementById('backendLabel');
+    const loadingOverlay = document.getElementById('loadingOverlay');
+    const loadingStatus = document.getElementById('loadingStatus');
+    const cameraError = document.getElementById('cameraError');
+    const statusDot = document.getElementById('statusDot');
+    const statusLabel = document.getElementById('statusLabel');
+    const clearLogBtn = document.getElementById('clearLog');
+    const streamLabel = document.getElementById('streamLabel');
+    const srcWebcam = document.getElementById('srcWebcam');
+    const srcScreen = document.getElementById('srcScreen');
+    const threatBanner = document.getElementById('threatBanner');
+    const threatBannerText = document.getElementById('threatBannerText');
+    const threatBadge = document.getElementById('threatBadge');
+    const threatBadgeText = document.getElementById('threatBadgeText');
+    const videoContainer = document.getElementById('videoContainer');
+    const activeThreatsEl = document.getElementById('activeThreats');
+    const activeThreatsPanel = document.getElementById('activeThreatsPanel');
+    const threatLevelPanel = document.getElementById('threatLevelPanel');
+    const statusThreat = document.getElementById('statusThreat');
+    const statusThreatLabel = document.getElementById('statusThreatLabel');
+    const statusThreatDiv = document.getElementById('statusThreatDiv');
+    const statusBar = document.getElementById('statusBar');
+
+    // ── THREAT CLASSIFICATION ──
+    // COCO-SSD classes mapped to threat tiers
+    const THREAT_CRITICAL = new Set(['knife', 'scissors']);
+    const THREAT_HIGH = new Set(['person', 'baseball bat', 'sports ball']);
+    const THREAT_MODERATE = new Set(['backpack', 'suitcase', 'handbag', 'bottle', 'umbrella']);
+    const THREAT_VEHICLE = new Set(['car', 'truck', 'bus', 'motorcycle', 'bicycle', 'airplane', 'train', 'boat']);
+
+    function getThreatTier(cls) {
+        if (THREAT_CRITICAL.has(cls)) return 'CRITICAL';
+        if (THREAT_HIGH.has(cls)) return 'HIGH';
+        if (THREAT_MODERATE.has(cls)) return 'MODERATE';
+        if (THREAT_VEHICLE.has(cls)) return 'VEHICLE';
+        return 'LOW';
+    }
+
+    function getThreatWeight(cls) {
+        if (THREAT_CRITICAL.has(cls)) return 50;
+        if (THREAT_HIGH.has(cls)) return 20;
+        if (THREAT_MODERATE.has(cls)) return 8;
+        if (THREAT_VEHICLE.has(cls)) return 5;
+        return 2;
+    }
+
+    // Color by threat tier
+    function getColor(cls) {
+        const tier = getThreatTier(cls);
+        switch(tier) {
+            case 'CRITICAL': return '#ef4444'; // red
+            case 'HIGH': return '#f97316'; // orange
+            case 'MODERATE': return '#eab308'; // yellow
+            case 'VEHICLE': return '#3b82f6'; // blue
+            default: return '#ffffff'; // white
+        }
+    }
+
+    function getTierColor(tier) {
+        switch(tier) {
+            case 'CRITICAL': return '#ef4444';
+            case 'HIGH': return '#f97316';
+            case 'MODERATE': return '#eab308';
+            case 'VEHICLE': return '#3b82f6';
+            default: return '#ffffff';
+        }
+    }
+
+    // State
+    let model = null;
+    let logEntries = [];
+    let logId = 0;
+    let frameCount = 0;
+    let lastFpsTime = performance.now();
+    let currentStream = null;
+    let activeSource = 'webcam';
+    let running = false;
+    let lastThreatLevel = 'CLEAR';
+
+    // FPS
+    function updateFps() {
+        const now = performance.now();
+        const delta = now - lastFpsTime;
+        if (delta >= 1000) {
+            fpsDisplay.textContent = Math.round((frameCount * 1000) / delta);
+            frameCount = 0;
+            lastFpsTime = now;
+        }
+    }
+
+    function syncCanvas() {
+        const rect = video.getBoundingClientRect();
+        if (canvas.width !== rect.width || canvas.height !== rect.height) {
+            canvas.width = rect.width;
+            canvas.height = rect.height;
+        }
+    }
+
+    // ── DRAW BOUNDING BOXES ──
+    function drawDetections(predictions) {
+        syncCanvas();
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        const vw = video.videoWidth, vh = video.videoHeight;
+        if (!vw || !vh) return;
+
+        const cw = canvas.width, ch = canvas.height;
+        const scale = Math.min(cw / vw, ch / vh);
+        const sw = vw * scale, sh = vh * scale;
+        const ox = (cw - sw) / 2, oy = (ch - sh) / 2;
+
+        for (const pred of predictions) {
+            const [bx, by, bw, bh] = pred.bbox;
+            const x = ox + (bx / vw) * sw;
+            const y = oy + (by / vh) * sh;
+            const w = (bw / vw) * sw;
+            const h = (bh / vh) * sh;
+
+            const tier = getThreatTier(pred.class);
+            const color = getColor(pred.class);
+            const conf = Math.round(pred.score * 100);
+            const isCritical = tier === 'CRITICAL';
+            const isHigh = tier === 'HIGH' || tier === 'CRITICAL';
+
+            // Glow for critical/high threats
+            if (isHigh) {
+                ctx.shadowColor = color;
+                ctx.shadowBlur = isCritical ? 12 : 6;
+            }
+
+            // Box stroke
+            ctx.strokeStyle = color;
+            ctx.lineWidth = isCritical ? 3 : 2;
+            ctx.strokeRect(x, y, w, h);
+
+            // Corner accents
+            const cl = isCritical ? 14 : 8;
+            ctx.lineWidth = isCritical ? 3 : 2;
+            ctx.beginPath(); ctx.moveTo(x, y + cl); ctx.lineTo(x, y); ctx.lineTo(x + cl, y); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(x + w - cl, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + cl); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(x, y + h - cl); ctx.lineTo(x, y + h); ctx.lineTo(x + cl, y + h); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(x + w - cl, y + h); ctx.lineTo(x + w, y + h); ctx.lineTo(x + w, y + h - cl); ctx.stroke();
+
+            ctx.shadowColor = 'transparent';
+            ctx.shadowBlur = 0;
+
+            // Label
+            const tierTag = isCritical ? ' [THREAT]' : (tier === 'HIGH' ? ' [ALERT]' : '');
+            const label = pred.class.toUpperCase() + ' ' + conf + '%' + tierTag;
+            ctx.font = (isCritical ? 'bold ' : '600 ') + '9px "Inter", monospace';
+            const tw = ctx.measureText(label).width;
+            const lh = 18;
+
+            // Label bg
+            ctx.fillStyle = isCritical ? 'rgba(127,29,29,0.92)' : 'rgba(0,0,0,0.85)';
+            ctx.fillRect(x, y - lh, tw + 10, lh);
+            // Label accent bar
+            ctx.fillStyle = color;
+            ctx.fillRect(x, y - lh, tw + 10, isCritical ? 2 : 1);
+            // Label text
+            ctx.fillStyle = '#ffffff';
+            ctx.fillText(label, x + 5, y - 5);
+
+            // Crosshair center for critical threats
+            if (isCritical) {
+                const cx = x + w/2, cy = y + h/2;
+                ctx.strokeStyle = 'rgba(239,68,68,0.5)';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([4, 4]);
+                ctx.beginPath(); ctx.moveTo(cx - 20, cy); ctx.lineTo(cx + 20, cy); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(cx, cy - 20); ctx.lineTo(cx, cy + 20); ctx.stroke();
+                ctx.setLineDash([]);
+            }
+        }
+    }
+
+    // ── THREAT ANALYSIS ──
+    function updateAnalysis(predictions) {
+        const counts = {};
+        let totalConf = 0, persons = 0, maxPersonConf = 0;
+        let threatScore = 0;
+        const threatItems = [];
+
+        for (const p of predictions) {
+            counts[p.class] = (counts[p.class] || 0) + 1;
+            totalConf += p.score;
+            const tier = getThreatTier(p.class);
+            const weight = getThreatWeight(p.class);
+            threatScore += weight * p.score;
+
+            if (tier === 'CRITICAL' || tier === 'HIGH') {
+                threatItems.push({ class: p.class, tier, score: p.score });
+            }
+            if (p.class === 'person') {
+                persons++;
+                if (p.score > maxPersonConf) maxPersonConf = p.score;
+            }
+        }
+
+        // ── Threat Level ──
+        const escLevel = Math.min(100, Math.round(threatScore));
+        let threatLevel;
+        if (threatItems.some(t => t.tier === 'CRITICAL')) {
+            threatLevel = 'CRITICAL';
+        } else if (escLevel >= 60) {
+            threatLevel = 'SEVERE';
+        } else if (escLevel >= 35) {
+            threatLevel = 'ELEVATED';
+        } else if (escLevel >= 15) {
+            threatLevel = 'GUARDED';
+        } else {
+            threatLevel = 'CLEAR';
+        }
+
+        escalationValue.textContent = escLevel;
+        escalationBar.style.width = escLevel + '%';
+
+        const levelStyles = {
+            CLEAR:    { text: 'text-emerald-400', bar: 'bg-emerald-500', border: 'border-white/10' },
+            GUARDED:  { text: 'text-blue-400',    bar: 'bg-blue-500',    border: 'border-white/10' },
+            ELEVATED: { text: 'text-yellow-400',   bar: 'bg-yellow-500',  border: 'border-yellow-500/20' },
+            SEVERE:   { text: 'text-orange-400',   bar: 'bg-orange-500',  border: 'border-orange-500/30' },
+            CRITICAL: { text: 'text-red-400',      bar: 'bg-red-500',     border: 'border-red-500/40' },
+        };
+        const ls = levelStyles[threatLevel];
+        escalationLabel.textContent = threatLevel;
+        escalationLabel.className = 'font-mono text-[10px] tracking-widest uppercase font-bold ' + ls.text;
+        escalationBar.className = 'h-full ' + ls.bar + ' threat-bar-fill';
+
+        // Threat level panel border
+        threatLevelPanel.className = 'crosshair-corners border p-2 transition-colors duration-300 ' + ls.border;
+
+        // ── Threat Banner + Video Border ──
+        const isThreat = threatLevel === 'CRITICAL' || threatLevel === 'SEVERE';
+        if (isThreat && lastThreatLevel !== threatLevel) {
+            const topThreat = threatItems.sort((a,b) => b.score - a.score)[0];
+            const bannerMsg = threatLevel === 'CRITICAL'
+                ? 'WEAPON DETECTED — ' + (topThreat ? topThreat.class.toUpperCase() : 'UNKNOWN') + ' — INITIATE LOCKDOWN PROTOCOL'
+                : 'MULTIPLE HIGH-THREAT OBJECTS — ELEVATED RESPONSE REQUIRED';
+            threatBannerText.textContent = bannerMsg;
+            threatBanner.classList.add('visible');
+            videoContainer.classList.add('threat-active');
+            statusBar.classList.add('border-t-red-500/50');
+        } else if (!isThreat) {
+            threatBanner.classList.remove('visible');
+            videoContainer.classList.remove('threat-active');
+            statusBar.classList.remove('border-t-red-500/50');
+        }
+        lastThreatLevel = threatLevel;
+
+        // Threat badge on video
+        if (predictions.length > 0) {
+            threatBadge.classList.remove('hidden');
+            threatBadgeText.textContent = threatLevel;
+            threatBadgeText.className = 'font-mono text-[7px] tracking-widest uppercase font-bold ' + ls.text;
+            threatBadge.className = 'absolute top-2 right-2 bg-black/80 px-2 py-1 border ' + ls.border;
+        } else {
+            threatBadge.classList.add('hidden');
+        }
+
+        // Status bar threat
+        if (isThreat) {
+            statusThreat.classList.remove('hidden');
+            statusThreatDiv.classList.remove('hidden');
+            statusThreatLabel.textContent = threatLevel;
+        } else {
+            statusThreat.classList.add('hidden');
+            statusThreatDiv.classList.add('hidden');
+        }
+
+        // ── Active Threats Panel ──
+        if (threatItems.length === 0) {
+            activeThreatsEl.innerHTML = '<div class="font-mono text-[8px] text-emerald-500/50 tracking-widest uppercase">ALL_CLEAR</div>';
+            activeThreatsPanel.className = 'crosshair-corners border border-white/10 p-2';
+        } else {
+            activeThreatsPanel.className = 'crosshair-corners border border-red-500/20 p-2';
+            activeThreatsEl.innerHTML = threatItems
+                .sort((a,b) => b.score - a.score)
+                .slice(0, 5)
+                .map(t => {
+                    const c = getTierColor(t.tier);
+                    return `<div class="flex items-center justify-between">
+                        <div class="flex items-center gap-1.5">
+                            <div class="w-1.5 h-1.5 ${t.tier === 'CRITICAL' ? 'animate-pulse' : ''}" style="background:${c}"></div>
+                            <span class="font-mono text-[8px] tracking-widest uppercase" style="color:${c}">${t.class.toUpperCase()}</span>
+                        </div>
+                        <span class="font-mono text-[7px] tracking-widest uppercase" style="color:${c}">${t.tier}</span>
+                    </div>`;
+                }).join('');
+        }
+
+        // ── Object Counts ──
+        if (predictions.length === 0) {
+            objectCounts.innerHTML = '<div class="font-mono text-[8px] text-white/20 tracking-widest uppercase">NO_DETECTIONS</div>';
+        } else {
+            const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+            objectCounts.innerHTML = sorted.map(([cls, cnt]) => {
+                const color = getColor(cls);
+                return `<div class="flex items-center justify-between">
+                    <div class="flex items-center gap-1.5">
+                        <div class="w-1.5 h-1.5" style="background:${color}"></div>
+                        <span class="font-mono text-[8px] tracking-widest uppercase text-white/60">${cls.toUpperCase()}</span>
+                    </div>
+                    <span class="font-mono text-[9px] font-bold text-white/80">${cnt}</span>
+                </div>`;
+            }).join('');
+        }
+
+        // Confidence
+        if (predictions.length > 0) {
+            const avg = Math.round((totalConf / predictions.length) * 100);
+            const confColor = isThreat ? 'text-red-400' : 'text-emerald-400';
+            confidenceDisplay.innerHTML = `<span class="font-mono text-[18px] font-bold ${confColor}">${avg}</span><span class="font-mono text-[8px] text-white/30">%</span>`;
+        } else {
+            confidenceDisplay.innerHTML = `<span class="font-mono text-[18px] font-bold text-emerald-400">--</span><span class="font-mono text-[8px] text-white/30">%</span>`;
+        }
+
+        // Person tracking
+        personCount.textContent = persons;
+        personConfidence.textContent = persons > 0 ? Math.round(maxPersonConf * 100) + '%' : '--';
+        statusObjectCount.textContent = predictions.length;
+    }
+
+    // ── DETECTION LOG ──
+    let lastLogClasses = '';
+    function updateLog(predictions) {
+        const currentClasses = predictions.map(p => p.class).sort().join(',');
+        if (currentClasses === lastLogClasses) return;
+        lastLogClasses = currentClasses;
+        if (predictions.length === 0) return;
+
+        const now = new Date();
+        const ts = String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0') + ':' + String(now.getSeconds()).padStart(2,'0');
+
+        const counts = {};
+        let maxTier = 'LOW';
+        for (const p of predictions) {
+            counts[p.class] = (counts[p.class] || 0) + 1;
+            const t = getThreatTier(p.class);
+            if (t === 'CRITICAL') maxTier = 'CRITICAL';
+            else if (t === 'HIGH' && maxTier !== 'CRITICAL') maxTier = 'HIGH';
+            else if (t === 'MODERATE' && maxTier === 'LOW') maxTier = 'MODERATE';
+        }
+
+        const summary = Object.entries(counts).map(([cls, cnt]) => cnt + 'x ' + cls.toUpperCase()).join(', ');
+        logId++;
+
+        const isCrit = maxTier === 'CRITICAL';
+        const isHigh = maxTier === 'HIGH';
+        const dotColor = isCrit ? 'bg-red-500 animate-pulse' : isHigh ? 'bg-orange-500' : maxTier === 'MODERATE' ? 'bg-yellow-500' : 'bg-emerald-500';
+        const textColor = isCrit ? 'text-red-400 font-bold' : isHigh ? 'text-orange-400/80' : 'text-white/50';
+        const borderColor = isCrit ? 'border-red-500/30 bg-red-950/20' : isHigh ? 'border-orange-500/20 bg-black/40' : 'border-white/5 bg-black/40';
+        const prefix = isCrit ? '[THREAT] ' : isHigh ? '[ALERT] ' : '';
+
+        const entry = document.createElement('div');
+        entry.className = 'detection-entry border p-1.5 ' + borderColor;
+        entry.innerHTML = `
+            <div class="flex items-center gap-1.5 mb-0.5">
+                <div class="w-1 h-1 ${dotColor}"></div>
+                <span class="font-mono text-[6px] tracking-widest text-white/30">${ts}</span>
+                <span class="font-mono text-[6px] tracking-widest text-white/20 ml-auto">#${String(logId).padStart(4,'0')}</span>
+            </div>
+            <div class="font-mono text-[7px] tracking-widest uppercase ${textColor}">${prefix}${summary}</div>
+        `;
+
+        if (logEntries.length === 0) detectionLog.innerHTML = '';
+        detectionLog.prepend(entry);
+        logEntries.push(entry);
+        detectionCount.textContent = logId;
+        while (detectionLog.children.length > 200) detectionLog.removeChild(detectionLog.lastChild);
+    }
+
+    clearLogBtn.addEventListener('click', () => {
+        detectionLog.innerHTML = '<div class="font-mono text-[7px] text-white/20 tracking-widest uppercase text-center py-8">LOG_CLEARED</div>';
+        logEntries = []; logId = 0; detectionCount.textContent = '0'; lastLogClasses = '';
+    });
+
+    // ── DETECTION LOOP ──
+    async function detect() {
+        if (!running) return;
+        if (!model || !video.videoWidth) { requestAnimationFrame(detect); return; }
+        try {
+            const predictions = await model.detect(video, 20, 0.35);
+            drawDetections(predictions);
+            updateAnalysis(predictions);
+            updateLog(predictions);
+        } catch (e) {}
+        frameCount++;
+        updateFps();
+        requestAnimationFrame(detect);
+    }
+
+    // ── STREAM MANAGEMENT ──
+    function stopStream() {
+        running = false;
+        if (currentStream) { currentStream.getTracks().forEach(t => t.stop()); currentStream = null; }
+        video.srcObject = null;
+    }
+
+    async function startWithStream(stream, label) {
+        stopStream();
+        currentStream = stream;
+        video.srcObject = stream;
+        await video.play();
+        const track = stream.getVideoTracks()[0];
+        const settings = track.getSettings();
+        resDisplay.textContent = (settings.width || '?') + 'x' + (settings.height || '?');
+        streamLabel.textContent = label;
+        track.addEventListener('ended', () => {
+            streamLabel.textContent = 'STREAM_ENDED';
+            statusDot.className = 'w-1.5 h-1.5 bg-yellow-500';
+            statusLabel.textContent = 'IDLE'; statusLabel.className = 'text-yellow-400';
+            running = false;
+        });
+        statusDot.className = 'w-1.5 h-1.5 bg-emerald-500 animate-pulse';
+        statusLabel.textContent = 'ACTIVE'; statusLabel.className = 'text-emerald-400';
+        running = true;
+        detect();
+    }
+
+    async function startWebcam() {
+        loadingOverlay.classList.remove('hidden'); cameraError.classList.add('hidden');
+        loadingStatus.textContent = 'REQUESTING CAMERA ACCESS...';
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' }, audio: false });
+            await ensureModel();
+            loadingOverlay.classList.add('hidden');
+            await startWithStream(stream, 'WEBCAM_0');
+        } catch (err) {
+            loadingOverlay.classList.add('hidden'); cameraError.classList.remove('hidden');
+            statusDot.className = 'w-1.5 h-1.5 bg-red-500';
+            statusLabel.textContent = 'ERROR'; statusLabel.className = 'text-red-400';
+        }
+    }
+
+    async function startScreenCapture() {
+        loadingOverlay.classList.remove('hidden'); cameraError.classList.add('hidden');
+        loadingStatus.textContent = 'SELECT A TAB OR WINDOW TO CAPTURE...';
+        try {
+            const stream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: 'never', width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false, preferCurrentTab: false });
+            await ensureModel();
+            loadingOverlay.classList.add('hidden');
+            await startWithStream(stream, 'SCREEN_CAPTURE');
+        } catch (err) {
+            loadingOverlay.classList.add('hidden');
+            if (err.name === 'NotAllowedError' || err.name === 'AbortError') {
+                statusDot.className = 'w-1.5 h-1.5 bg-yellow-500';
+                statusLabel.textContent = 'IDLE'; statusLabel.className = 'text-yellow-400';
+                streamLabel.textContent = 'NO_SOURCE';
+            } else {
+                document.getElementById('errorTitle').textContent = 'SCREEN_CAPTURE_FAILED';
+                document.getElementById('errorMsg').textContent = err.message || 'UNKNOWN ERROR';
+                cameraError.classList.remove('hidden');
+                statusDot.className = 'w-1.5 h-1.5 bg-red-500';
+                statusLabel.textContent = 'ERROR'; statusLabel.className = 'text-red-400';
+            }
+        }
+    }
+
+    async function ensureModel() {
+        if (model) return;
+        loadingStatus.textContent = 'LOADING COCO-SSD MODEL...';
+        try { model = await cocoSsd.load({ base: 'lite_mobilenet_v2' }); }
+        catch (e) { loadingStatus.textContent = 'RETRYING WITH DEFAULT MODEL...'; model = await cocoSsd.load(); }
+        backendLabel.textContent = tf.getBackend() ? tf.getBackend().toUpperCase() : 'CPU';
+    }
+
+    // Source buttons
+    function setActiveBtn(btn) {
+        document.querySelectorAll('.src-btn').forEach(b => {
+            b.classList.remove('src-active','bg-white/10','border-white/20','text-white/80');
+            b.classList.add('bg-transparent','border-white/10','text-white/40');
+        });
+        btn.classList.add('src-active');
+        btn.classList.remove('bg-transparent','border-white/10','text-white/40');
+        btn.classList.add('bg-white/10','border-white/20','text-white/80');
+    }
+
+    srcWebcam.addEventListener('click', () => {
+        if (activeSource === 'webcam' && running) return;
+        activeSource = 'webcam'; setActiveBtn(srcWebcam); startWebcam();
+    });
+    srcScreen.addEventListener('click', () => {
+        activeSource = 'screen'; setActiveBtn(srcScreen); startScreenCapture();
+    });
+
+    window.addEventListener('resize', syncCanvas);
+    startWebcam();
+})();
+</script>
+
+</body>
+</html>
