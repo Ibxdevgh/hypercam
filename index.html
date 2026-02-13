@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>HYPERCAM</title>
+    <link rel="icon" type="image/png" href="logo.png">
     <script src="3.4.17"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -143,6 +144,16 @@
                     navLinksDiv.appendChild(xLink);
                 }
             }
+            // Remove LinkedIn link and update email in footer
+            document.querySelectorAll('a').forEach(function(el){
+                if (el.href && el.href.indexOf('linkedin.com') !== -1) {
+                    el.parentElement.removeChild(el);
+                }
+                if (el.href && el.href.indexOf('mailto:srihan@protent.ai') !== -1) {
+                    el.href = 'mailto:hello@hypercam.io';
+                    el.textContent = 'Email';
+                }
+            });
             // Replace all Protent text with HYPERCAM
             var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
             var node;

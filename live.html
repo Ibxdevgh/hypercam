@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Protent — HYPERCAM</title>
+    <title>HYPERCAM — Live Detection</title>
+    <link rel="icon" type="image/png" href="logo.png">
     <script src="3.4.17"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -298,14 +299,26 @@
     // ── THREAT CLASSIFICATION ──
     // COCO-SSD classes mapped to threat tiers
     const THREAT_CRITICAL = new Set(['knife', 'scissors']);
-    const THREAT_HIGH = new Set(['person', 'baseball bat', 'sports ball']);
+    const THREAT_HIGH = new Set(['baseball bat']);
     const THREAT_MODERATE = new Set(['backpack', 'suitcase', 'handbag', 'bottle', 'umbrella']);
     const THREAT_VEHICLE = new Set(['car', 'truck', 'bus', 'motorcycle', 'bicycle', 'airplane', 'train', 'boat']);
+
+    // Combo detection: person + dangerous object = escalate
+    let comboActive = false;
+    function checkCombos(predictions) {
+        const classes = new Set(predictions.map(p => p.class));
+        const hasPerson = classes.has('person');
+        const hasDanger = [...classes].some(c => THREAT_CRITICAL.has(c) || THREAT_HIGH.has(c));
+        const hasSuspicious = [...classes].some(c => THREAT_MODERATE.has(c));
+        comboActive = hasPerson && (hasDanger || hasSuspicious);
+    }
 
     function getThreatTier(cls) {
         if (THREAT_CRITICAL.has(cls)) return 'CRITICAL';
         if (THREAT_HIGH.has(cls)) return 'HIGH';
-        if (THREAT_MODERATE.has(cls)) return 'MODERATE';
+        // Person only escalates when combo is active (person + weapon/suspicious item)
+        if (cls === 'person') return comboActive ? 'HIGH' : 'LOW';
+        if (THREAT_MODERATE.has(cls)) return comboActive ? 'HIGH' : 'MODERATE';
         if (THREAT_VEHICLE.has(cls)) return 'VEHICLE';
         return 'LOW';
     }
@@ -313,7 +326,8 @@
     function getThreatWeight(cls) {
         if (THREAT_CRITICAL.has(cls)) return 50;
         if (THREAT_HIGH.has(cls)) return 20;
-        if (THREAT_MODERATE.has(cls)) return 8;
+        if (cls === 'person') return comboActive ? 15 : 1;
+        if (THREAT_MODERATE.has(cls)) return comboActive ? 12 : 3;
         if (THREAT_VEHICLE.has(cls)) return 5;
         return 2;
     }
@@ -462,7 +476,9 @@
             const weight = getThreatWeight(p.class);
             threatScore += weight * p.score;
 
-            if (tier === 'CRITICAL' || tier === 'HIGH') {
+            if (tier === 'CRITICAL' || (tier === 'HIGH' && p.class !== 'person')) {
+                threatItems.push({ class: p.class, tier, score: p.score });
+            } else if (tier === 'HIGH' && p.class === 'person' && comboActive) {
                 threatItems.push({ class: p.class, tier, score: p.score });
             }
             if (p.class === 'person') {
@@ -650,11 +666,14 @@
     });
 
     // ── DETECTION LOOP ──
+    let lastPredictions = [];
     async function detect() {
         if (!running) return;
         if (!model || !video.videoWidth) { requestAnimationFrame(detect); return; }
         try {
             const predictions = await model.detect(video, 20, 0.35);
+            lastPredictions = predictions;
+            checkCombos(predictions);
             drawDetections(predictions);
             updateAnalysis(predictions);
             updateLog(predictions);
@@ -663,6 +682,15 @@
         updateFps();
         requestAnimationFrame(detect);
     }
+
+    // Redraw boxes on animation frame to keep them synced with video
+    function redrawLoop() {
+        if (running && lastPredictions.length > 0) {
+            drawDetections(lastPredictions);
+        }
+        requestAnimationFrame(redrawLoop);
+    }
+    requestAnimationFrame(redrawLoop);
 
     // ── STREAM MANAGEMENT ──
     function stopStream() {
