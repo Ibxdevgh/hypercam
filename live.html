@@ -378,21 +378,31 @@
 
     function syncCanvas() {
         const rect = video.getBoundingClientRect();
-        if (canvas.width !== rect.width || canvas.height !== rect.height) {
-            canvas.width = rect.width;
-            canvas.height = rect.height;
+        const dpr = window.devicePixelRatio || 1;
+        const w = Math.round(rect.width);
+        const h = Math.round(rect.height);
+        if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
+            canvas.width = w * dpr;
+            canvas.height = h * dpr;
+            canvas.style.width = w + 'px';
+            canvas.style.height = h + 'px';
+            ctx.scale(dpr, dpr);
         }
     }
 
     // ── DRAW BOUNDING BOXES ──
     function drawDetections(predictions) {
         syncCanvas();
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const rect = video.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        const cw = Math.round(rect.width);
+        const ch = Math.round(rect.height);
+        ctx.clearRect(0, 0, cw, ch);
 
         const vw = video.videoWidth, vh = video.videoHeight;
         if (!vw || !vh) return;
 
-        const cw = canvas.width, ch = canvas.height;
+        // Match object-fit: contain scaling
         const scale = Math.min(cw / vw, ch / vh);
         const sw = vw * scale, sh = vh * scale;
         const ox = (cw - sw) / 2, oy = (ch - sh) / 2;
@@ -666,13 +676,11 @@
     });
 
     // ── DETECTION LOOP ──
-    let lastPredictions = [];
     async function detect() {
         if (!running) return;
         if (!model || !video.videoWidth) { requestAnimationFrame(detect); return; }
         try {
             const predictions = await model.detect(video, 20, 0.35);
-            lastPredictions = predictions;
             checkCombos(predictions);
             drawDetections(predictions);
             updateAnalysis(predictions);
@@ -682,15 +690,6 @@
         updateFps();
         requestAnimationFrame(detect);
     }
-
-    // Redraw boxes on animation frame to keep them synced with video
-    function redrawLoop() {
-        if (running && lastPredictions.length > 0) {
-            drawDetections(lastPredictions);
-        }
-        requestAnimationFrame(redrawLoop);
-    }
-    requestAnimationFrame(redrawLoop);
 
     // ── STREAM MANAGEMENT ──
     function stopStream() {
