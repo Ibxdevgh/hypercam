@@ -675,9 +675,9 @@
 
     // ── DETECTION LOOP ──
     let lastPredictions = [];
-    let detecting = false;
+    let detectTimer = null;
 
-    // Render loop: always draws fresh video frame + last known boxes
+    // Render loop: draws video frame + last known boxes
     function renderLoop() {
         if (!running) return;
         if (video.videoWidth && video.videoHeight) {
@@ -688,31 +688,36 @@
         requestAnimationFrame(renderLoop);
     }
 
-    // Detection loop: runs model in background, updates predictions
-    async function detectLoop() {
-        while (running) {
-            if (!model || !video.videoWidth) {
-                await new Promise(r => setTimeout(r, 100));
-                continue;
-            }
-            try {
-                const predictions = await model.detect(video, 20, 0.35);
-                checkCombos(predictions);
-                lastPredictions = predictions;
-                updateAnalysis(predictions);
-                updateLog(predictions);
-            } catch (e) {}
+    // Detection: run model, then schedule next with a gap to avoid hammering GPU
+    async function runDetection() {
+        if (!running) return;
+        if (!model || !video.videoWidth) {
+            detectTimer = setTimeout(runDetection, 200);
+            return;
         }
+        try {
+            const predictions = await model.detect(video, 20, 0.35);
+            checkCombos(predictions);
+            lastPredictions = predictions;
+            updateAnalysis(predictions);
+            updateLog(predictions);
+        } catch (e) {}
+        if (running) detectTimer = setTimeout(runDetection, 50);
     }
 
     function detect() {
         requestAnimationFrame(renderLoop);
-        detectLoop();
+        runDetection();
+    }
+
+    function stopDetection() {
+        if (detectTimer) { clearTimeout(detectTimer); detectTimer = null; }
     }
 
     // ── STREAM MANAGEMENT ──
     function stopStream() {
         running = false;
+        stopDetection();
         if (currentStream) { currentStream.getTracks().forEach(t => t.stop()); currentStream = null; }
         video.srcObject = null;
     }
