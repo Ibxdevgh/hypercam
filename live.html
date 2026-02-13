@@ -47,8 +47,8 @@
         ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.25); }
 
         #videoContainer { position: relative; }
-        #webcam { display: block; width: 100%; height: 100%; object-fit: contain; background: #000; }
-        #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+        #webcam { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; background: #000; opacity: 0; pointer-events: none; }
+        #overlay { display: block; width: 100%; height: 100%; background: #000; }
 
         .detection-entry { animation: fadeSlideIn 0.2s ease-out; }
         @keyframes fadeSlideIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
@@ -377,35 +377,33 @@
     }
 
     function syncCanvas() {
-        const rect = video.getBoundingClientRect();
+        const rect = canvas.getBoundingClientRect();
         const dpr = window.devicePixelRatio || 1;
         const w = Math.round(rect.width);
         const h = Math.round(rect.height);
         if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
             canvas.width = w * dpr;
             canvas.height = h * dpr;
-            canvas.style.width = w + 'px';
-            canvas.style.height = h + 'px';
-            ctx.scale(dpr, dpr);
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         }
     }
 
-    // ── DRAW BOUNDING BOXES ──
+    // ── DRAW VIDEO FRAME + BOUNDING BOXES (always in sync) ──
     function drawDetections(predictions) {
         syncCanvas();
-        const rect = video.getBoundingClientRect();
         const dpr = window.devicePixelRatio || 1;
-        const cw = Math.round(rect.width);
-        const ch = Math.round(rect.height);
+        const cw = canvas.width / dpr;
+        const ch = canvas.height / dpr;
         ctx.clearRect(0, 0, cw, ch);
 
         const vw = video.videoWidth, vh = video.videoHeight;
         if (!vw || !vh) return;
 
-        // Match object-fit: contain scaling
+        // Draw video frame onto canvas (object-fit: contain)
         const scale = Math.min(cw / vw, ch / vh);
         const sw = vw * scale, sh = vh * scale;
         const ox = (cw - sw) / 2, oy = (ch - sh) / 2;
+        ctx.drawImage(video, ox, oy, sw, sh);
 
         for (const pred of predictions) {
             const [bx, by, bw, bh] = pred.bbox;
@@ -676,19 +674,40 @@
     });
 
     // ── DETECTION LOOP ──
-    async function detect() {
+    let lastPredictions = [];
+    let detecting = false;
+
+    // Render loop: always draws fresh video frame + last known boxes
+    function renderLoop() {
         if (!running) return;
-        if (!model || !video.videoWidth) { requestAnimationFrame(detect); return; }
-        try {
-            const predictions = await model.detect(video, 20, 0.35);
-            checkCombos(predictions);
-            drawDetections(predictions);
-            updateAnalysis(predictions);
-            updateLog(predictions);
-        } catch (e) {}
-        frameCount++;
-        updateFps();
-        requestAnimationFrame(detect);
+        if (video.videoWidth && video.videoHeight) {
+            drawDetections(lastPredictions);
+            frameCount++;
+            updateFps();
+        }
+        requestAnimationFrame(renderLoop);
+    }
+
+    // Detection loop: runs model in background, updates predictions
+    async function detectLoop() {
+        while (running) {
+            if (!model || !video.videoWidth) {
+                await new Promise(r => setTimeout(r, 100));
+                continue;
+            }
+            try {
+                const predictions = await model.detect(video, 20, 0.35);
+                checkCombos(predictions);
+                lastPredictions = predictions;
+                updateAnalysis(predictions);
+                updateLog(predictions);
+            } catch (e) {}
+        }
+    }
+
+    function detect() {
+        requestAnimationFrame(renderLoop);
+        detectLoop();
     }
 
     // ── STREAM MANAGEMENT ──
