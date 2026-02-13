@@ -128,6 +128,22 @@
                     svg.parentNode.replaceChild(img, svg);
                 }
             });
+            // Add X link to nav next to LIVE DETECTION button
+            if (!document.getElementById('x-link')) {
+                var liveBtns = document.querySelectorAll('a[href="live.html"]');
+                if (liveBtns.length > 0) {
+                    var navBtn = liveBtns[0]; // first one is the nav button
+                    var xLink = document.createElement('a');
+                    xLink.id = 'x-link';
+                    xLink.href = 'https://x.com/hypercam';
+                    xLink.target = '_blank';
+                    xLink.style.cssText = 'display:inline-flex;align-items:center;margin-right:16px;opacity:0.5;transition:opacity 0.2s;';
+                    xLink.onmouseenter = function(){ this.style.opacity='1'; };
+                    xLink.onmouseleave = function(){ this.style.opacity='0.5'; };
+                    xLink.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>';
+                    navBtn.parentNode.insertBefore(xLink, navBtn);
+                }
+            }
             // Replace all Protent text with HYPERCAM
             var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
             var node;
