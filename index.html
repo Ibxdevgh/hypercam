@@ -117,6 +117,17 @@
                     delete btnTargets[t];
                 }
             });
+            // Replace P logo SVGs with HYPERCAM logo (nav + footer)
+            document.querySelectorAll('svg').forEach(function(svg){
+                var p = svg.querySelector('path');
+                var d = p ? p.getAttribute('d') || '' : '';
+                if (d.indexOf('M6 4v10') !== -1) {
+                    var img = document.createElement('img');
+                    img.src = 'logo.png';
+                    img.style.cssText = 'width:80px;height:28px;object-fit:cover;';
+                    svg.parentNode.replaceChild(img, svg);
+                }
+            });
             // Replace all Protent text with HYPERCAM
             var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
             var node;
