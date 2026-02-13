@@ -743,9 +743,10 @@
         loadingStatus.textContent = 'REQUESTING CAMERA ACCESS...';
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' }, audio: false });
-            await ensureModel();
-            loadingOverlay.classList.add('hidden');
+            // Show video feed immediately, load model in background
             await startWithStream(stream, 'WEBCAM_0');
+            loadingOverlay.classList.add('hidden');
+            ensureModel();
         } catch (err) {
             loadingOverlay.classList.add('hidden'); cameraError.classList.remove('hidden');
             statusDot.className = 'w-1.5 h-1.5 bg-red-500';
@@ -758,9 +759,9 @@
         loadingStatus.textContent = 'SELECT A TAB OR WINDOW TO CAPTURE...';
         try {
             const stream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: 'never', width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false, preferCurrentTab: false });
-            await ensureModel();
-            loadingOverlay.classList.add('hidden');
             await startWithStream(stream, 'SCREEN_CAPTURE');
+            loadingOverlay.classList.add('hidden');
+            ensureModel();
         } catch (err) {
             loadingOverlay.classList.add('hidden');
             if (err.name === 'NotAllowedError' || err.name === 'AbortError') {
